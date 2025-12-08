@@ -1,71 +1,90 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.10.0)
 project(arms_wifi_bridge)
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
-# find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(libtrossen_arm REQUIRED)
 
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
-
-add_executable(leader_teleop src/leader.cpp)
-
-target_include_directories(leader_teleop PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
-target_compile_features(leader_teleop PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
-ament_target_dependencies(
-  leader_teleop
-  "sensor_msgs"
-  "rclcpp"
-  "libtrossen_arm"
+set(ROS_DEPENDENCIES
+  rclcpp
 )
 
-target_link_libraries(leader_teleop
+add_executable(leader_node
+  src/leader_node_tcp.cpp
+)
+
+target_include_directories(leader_node PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/arms_wifi_bridge
+)
+
+ament_target_dependencies(leader_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+)
+
+# Follower node (similar structure)
+add_executable(follower_node
+  src/follower_node_tcp.cpp
+)
+
+target_include_directories(follower_node PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/arms_wifi_bridge
+)
+
+ament_target_dependencies(follower_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+)
+
+# Install
+install(TARGETS
+  leader_node
+  follower_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# Install launch files if you have them
+# install(DIRECTORY
+#   launch
+#   DESTINATION share/${PROJECT_NAME}
+#   OPTIONAL_DEPENDENCIES
+# )
+
+################# tests #############################
+add_executable(test_plain_libtrossen test/plain_libtrossen_test.cpp)
+target_link_libraries(test_plain_libtrossen
   libtrossen_arm
 )
-
-install(TARGETS leader_teleop
-  DESTINATION lib/${PROJECT_NAME})
-
-add_executable(follower_teleop src/follower.cpp)
-
-target_include_directories(follower_teleop PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
-target_compile_features(follower_teleop PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
-ament_target_dependencies(
-  follower_teleop
-  "sensor_msgs"
-  "rclcpp"
-  "libtrossen_arm"
+install(
+  TARGETS test_plain_libtrossen
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
-target_link_libraries(follower_teleop
+#################
+add_executable(test_empty_ros_node test/empty_ros_node.cpp)
+ament_target_dependencies(test_empty_ros_node rclcpp)
+target_link_libraries(test_empty_ros_node
   libtrossen_arm
 )
+install(
+  TARGETS test_empty_ros_node
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
 
-install(TARGETS follower_teleop
-  DESTINATION lib/${PROJECT_NAME})
+#################
+add_executable(minimal_trossen_ros_crash test/minimal_trossen_ros_crash.cpp)
+ament_target_dependencies(minimal_trossen_ros_crash rclcpp)
+target_link_libraries(minimal_trossen_ros_crash
+  libtrossen_arm
+)
+install(
+  TARGETS minimal_trossen_ros_crash
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
 
-
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
-  set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
 
 ament_package()
