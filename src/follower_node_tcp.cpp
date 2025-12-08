@@ -105,6 +105,13 @@ public:
   ~FollowerBridge()
   {
     RCLCPP_INFO(this->get_logger(), "Shutting down follower bridge...");
+    
+    // CRITICAL FIX: Cancel timer before cleanup to prevent deadlock
+    if (teleoperation_timer_) {
+      teleoperation_timer_->cancel();
+      teleoperation_timer_ = nullptr;
+    }
+    
     if (teleoperation_active_) {
       emergency_stop();
     }
@@ -159,6 +166,12 @@ private:
 
   void joint_state_callback(sensor_msgs::msg::JointState::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(q_mtx_);
+    
+    // SAFETY: Validate incoming data size
+    if (msg->position.empty()) {
+      RCLCPP_WARN(this->get_logger(), "Received empty position data");
+      return;
+    }
     
     const size_t mp = std::min(num_joints_, msg->position.size());
     const size_t mv = std::min(num_joints_, msg->velocity.size());
@@ -277,6 +290,13 @@ private:
       pub_efforts_->publish(effort_msg_);
     } catch (const std::exception& e) {
       RCLCPP_ERROR(this->get_logger(), "TCP error in control loop: %s", e.what());
+      // CRITICAL FIX: Stop on TCP failure
+      connection_lost_ = true;
+      teleoperation_timer_->cancel();
+      teleoperation_active_ = false;
+      emergency_stop();
+      return_to_home_and_sleep();
+      return;
     }
   }
 

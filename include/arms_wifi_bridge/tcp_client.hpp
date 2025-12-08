@@ -27,6 +27,13 @@ public:
       return false;
     }
 
+    // Set socket timeouts to prevent hanging
+    struct timeval tv;
+    tv.tv_sec = 1;  // 1 second timeout
+    tv.tv_usec = 0;
+    setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(sock_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
     struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port_);
@@ -68,16 +75,25 @@ public:
       return resp;
     }
 
-    // Serialize and send
+    // Serialize message
     std::string msg_str = msg.serialize();
-    ssize_t sent = send(sock_, msg_str.c_str(), msg_str.length(), 0);
     
-    if (sent < 0) {
-      arm_protocol::Response resp;
-      resp.success = false;
-      resp.error = "Send failed";
-      connected_ = false;
-      return resp;
+    // CRITICAL FIX: Ensure all bytes are sent
+    size_t total_sent = 0;
+    size_t len = msg_str.length();
+    while (total_sent < len) {
+      ssize_t sent = ::send(sock_, msg_str.c_str() + total_sent, 
+                            len - total_sent, 0);
+      
+      if (sent < 0) {
+        arm_protocol::Response resp;
+        resp.success = false;
+        resp.error = "Send failed";
+        connected_ = false;
+        return resp;
+      }
+      
+      total_sent += sent;
     }
 
     // Receive response (read until newline)
@@ -90,7 +106,7 @@ public:
       if (received <= 0) {
         arm_protocol::Response resp;
         resp.success = false;
-        resp.error = "Connection closed";
+        resp.error = "Connection closed or timeout";
         connected_ = false;
         return resp;
       }
