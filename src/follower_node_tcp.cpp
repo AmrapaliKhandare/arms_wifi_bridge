@@ -106,10 +106,15 @@ public:
   {
     RCLCPP_INFO(this->get_logger(), "Shutting down follower bridge...");
     
-    // CRITICAL FIX: Cancel timer before cleanup to prevent deadlock
+    // Cancel all timers before cleanup to prevent deadlock
     if (teleoperation_timer_) {
       teleoperation_timer_->cancel();
-      teleoperation_timer_ = nullptr;
+    }
+    if (sync_timer_) {
+      sync_timer_->cancel();
+    }
+    if (ready_timer_) {
+      ready_timer_->cancel();
     }
     
     if (teleoperation_active_) {

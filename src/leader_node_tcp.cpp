@@ -105,6 +105,18 @@ public:
   ~LeaderBridge()
   {
     RCLCPP_INFO(this->get_logger(), "Shutting down leader bridge...");
+    
+    // Cancel all timers before cleanup to prevent deadlock
+    if (teleoperation_timer_) {
+      teleoperation_timer_->cancel();
+    }
+    if (sync_timer_) {
+      sync_timer_->cancel();
+    }
+    if (ready_timer_) {
+      ready_timer_->cancel();
+    }
+    
     if (teleoperation_active_) {
       emergency_stop();
     }
@@ -274,6 +286,13 @@ private:
       pub_joint_states_->publish(js_msg_);
     } catch (const std::exception& e) {
       RCLCPP_ERROR(this->get_logger(), "TCP error in control loop: %s", e.what());
+      // CRITICAL FIX: Stop on TCP failure
+      connection_lost_ = true;
+      teleoperation_timer_->cancel();
+      teleoperation_active_ = false;
+      emergency_stop();
+      return_to_home_and_sleep();
+      return;
     }
   }
 
