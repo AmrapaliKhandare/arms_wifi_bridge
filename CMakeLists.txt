@@ -86,5 +86,15 @@ install(
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
+##################
+add_executable(test_move_home_sleep test/test_move_home_sleep.cpp)
+target_include_directories(test_move_home_sleep PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/arms_wifi_bridge
+)
+install(
+  TARGETS test_move_home_sleep
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
 
 ament_package()

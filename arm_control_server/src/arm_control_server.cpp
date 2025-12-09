@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstring>
 #include <cmath>
+#include <cerrno>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -95,6 +96,13 @@ public:
         continue;
       }
 
+      // Set socket timeouts to prevent hanging
+      struct timeval tv;
+      tv.tv_sec = 5;  // 5 second timeout (longer for move_home/sleep)
+      tv.tv_usec = 0;
+      setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+      setsockopt(client_sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
       std::cout << "[Server] Client connected" << std::endl;
 
       // Handle client in new thread
@@ -126,8 +134,16 @@ private:
       ssize_t received = recv(client_sock, recv_buffer, sizeof(recv_buffer) - 1, 0);
       
       if (received <= 0) {
-        std::cout << "[Server] Client disconnected" << std::endl;
-        break;
+        if (received == 0) {
+          std::cout << "[Server] Client disconnected" << std::endl;
+          break;
+        } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+          // Timeout - this is OK, just continue waiting for data
+          continue;
+        } else {
+          std::cerr << "[Server] Receive error: " << strerror(errno) << std::endl;
+          break;
+        }
       }
 
       recv_buffer[received] = '\0';
@@ -142,9 +158,23 @@ private:
         // Process message
         auto response = process_message(message);
         
-        // Send response
+        // serialize() already includes '\n', don't add another
         std::string response_str = response.serialize();
-        send(client_sock, response_str.c_str(), response_str.length(), 0);
+        
+        // CRITICAL: Ensure all bytes are sent
+        size_t total_sent = 0;
+        size_t len = response_str.length();
+        
+        while (total_sent < len) {
+          ssize_t sent = send(client_sock, response_str.c_str() + total_sent, 
+                             len - total_sent, 0);
+          if (sent <= 0) {
+            std::cerr << "[Server] Send failed: " << strerror(errno) << std::endl;
+            close(client_sock);
+            return;
+          }
+          total_sent += sent;
+        }
       }
     }
 
@@ -189,11 +219,27 @@ private:
           break;
 
         case arm_protocol::Command::SET_POSITIONS:
+          // SAFETY: Validate joint count
+          if (msg.data.size() != driver_.get_num_joints()) {
+            response.success = false;
+            response.error = "Invalid number of joints in position command";
+            std::cerr << "[Server] ERROR: Expected " << driver_.get_num_joints() 
+                     << " joints, got " << msg.data.size() << std::endl;
+            break;
+          }
           driver_.set_all_positions(msg.data, 0.0f, false);
           response.success = true;
           break;
 
         case arm_protocol::Command::SET_EFFORTS:
+          // SAFETY: Validate joint count
+          if (msg.data.size() != driver_.get_num_joints()) {
+            response.success = false;
+            response.error = "Invalid number of joints in effort command";
+            std::cerr << "[Server] ERROR: Expected " << driver_.get_num_joints() 
+                     << " joints, got " << msg.data.size() << std::endl;
+            break;
+          }
           driver_.set_all_external_efforts(msg.data, 0.0f, false);
           response.success = true;
           break;
@@ -220,6 +266,7 @@ private:
     } catch (const std::exception& e) {
       response.success = false;
       response.error = std::string("Error: ") + e.what();
+      std::cerr << "[Server] Exception in process_message: " << e.what() << std::endl;
     }
 
     return response;

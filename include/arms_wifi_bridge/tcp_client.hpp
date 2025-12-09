@@ -4,10 +4,11 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <cerrno>
+#include <cstring>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <cstring>
 #include "arm_protocol.hpp"
 
 class TCPClient {
@@ -28,8 +29,9 @@ public:
     }
 
     // Set socket timeouts to prevent hanging
+    // NOTE: move_home and move_sleep take ~2-3 seconds, so timeout must be longer
     struct timeval tv;
-    tv.tv_sec = 1;  // 1 second timeout
+    tv.tv_sec = 5;  // 5 second timeout
     tv.tv_usec = 0;
     setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(sock_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -88,7 +90,7 @@ public:
       if (sent < 0) {
         arm_protocol::Response resp;
         resp.success = false;
-        resp.error = "Send failed";
+        resp.error = std::string("Send failed: ") + strerror(errno);
         connected_ = false;
         return resp;
       }
@@ -103,10 +105,16 @@ public:
     while (true) {
       ssize_t received = recv(sock_, buffer, sizeof(buffer) - 1, 0);
       
-      if (received <= 0) {
+      if (received < 0) {
         arm_protocol::Response resp;
         resp.success = false;
-        resp.error = "Connection closed or timeout";
+        resp.error = std::string("Receive failed: ") + strerror(errno);
+        connected_ = false;
+        return resp;
+      } else if (received == 0) {
+        arm_protocol::Response resp;
+        resp.success = false;
+        resp.error = "Connection closed by server";
         connected_ = false;
         return resp;
       }
